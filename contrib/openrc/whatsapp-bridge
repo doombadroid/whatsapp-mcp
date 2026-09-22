@@ -1,0 +1,55 @@
+#!/sbin/openrc-run
+# WhatsApp Web bridge for the whatsapp-mcp MCP server. Links this box to
+# WhatsApp as a companion device (whatsmeow) and exposes a small REST API
+# on loopback that the MCP server calls.
+#
+# Pairing is interactive and is NOT done by this service: run the binary by
+# hand once and scan the QR. This service refuses to start until that has
+# happened, so it can never respawn-loop emitting QR codes nobody sees.
+
+description="WhatsApp bridge (whatsmeow) for whatsapp-mcp"
+
+supervisor=supervise-daemon
+command_user="${WABRIDGE_USER:-timb}"
+WABRIDGE_HOME="$(getent passwd "${command_user%%:*}" | cut -d: -f6)"
+WABRIDGE_DIR="${WABRIDGE_DIR:-${WABRIDGE_HOME}/projects/whatsapp-mcp/whatsapp-bridge}"
+command="${WABRIDGE_DIR}/whatsapp-bridge"
+# store/ is resolved relative to the working directory, so chdir matters.
+directory="${WABRIDGE_DIR}"
+respawn_delay=5
+respawn_max=0
+output_log="/var/log/whatsapp-bridge.log"
+error_log="/var/log/whatsapp-bridge.log"
+export HOME="${WABRIDGE_HOME}"
+
+depend() {
+	need localmount net
+}
+
+start_pre() {
+	checkpath -f -o "${command_user}" -m 0644 /var/log/whatsapp-bridge.log
+
+	if [ ! -x "${command}" ]; then
+		eerror "bridge binary not built: ${command}"
+		eerror "build it with: cd ${WABRIDGE_DIR} && go build -o whatsapp-bridge ."
+		return 1
+	fi
+
+	# Refuse to start unless a device is actually paired. whatsmeow writes a
+	# row with an empty jid as soon as it generates a QR, so presence of the
+	# row proves nothing -- the jid being populated is what proves pairing.
+	_db="${WABRIDGE_DIR}/store/whatsapp.db"
+	if [ ! -f "${_db}" ]; then
+		eerror "not paired yet (no ${_db})"
+		eerror "run '${command}' by hand and scan the QR first"
+		return 1
+	fi
+	_jid="$(sqlite3 "${_db}" \
+		"SELECT COALESCE(jid,'') FROM whatsmeow_device LIMIT 1;" 2>/dev/null)"
+	if [ -z "${_jid}" ]; then
+		eerror "not paired yet (whatsmeow_device.jid is empty)"
+		eerror "run '${command}' by hand and scan the QR first"
+		return 1
+	fi
+	einfo "paired as ${_jid}"
+}
