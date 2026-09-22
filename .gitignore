@@ -1,3 +1,6 @@
 *.db
 claude_desktop_config.json
 whatsapp.log
+# build artifact (24MB)
+whatsapp-bridge/whatsapp-bridge
+store/
